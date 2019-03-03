@@ -49,8 +49,10 @@ class Grillo:
     """
     Tool to send data to a different computer or receive it, just using audio and mic.
     """
-    HEADER_SEPARATOR = b"|"
     FILE_NAME_SEPARATOR = b"<NAME>"
+
+    EOB = b"\0" # End of block
+    BLOCK_SIZE = 29
 
     def __init__(self, send=False, receive=False):
         """
@@ -70,12 +72,21 @@ class Grillo:
         """
         Build a serialized message to send over audio.
         """
-        message = kind.value.encode("utf-8") + Grillo.HEADER_SEPARATOR + payload
+        message = kind.value.encode("utf-8") + payload
 
-        if len(message) > 32:
-            raise MessageTooLongException()
+        num_of_blocks = (len(message) // self.BLOCK_SIZE) + 1
+        info_header = str(num_of_blocks).encode("utf-8") + self.EOB
 
-        self.chirp.send(message, blocking=True)
+        self.chirp.send(info_header)
+
+        for i in range(num_of_blocks):
+            index = i * self.BLOCK_SIZE
+
+            header = f"{i + 1:02}".encode("utf-8")
+            body = message[index:index + self.BLOCK_SIZE]
+
+            chirp_payload = header + body + self.EOB
+            self.chirp.send(chirp_payload, blocking=True)
 
     def read_message(self, message):
         """
@@ -84,7 +95,7 @@ class Grillo:
         parts = message.split(Grillo.HEADER_SEPARATOR)
 
         kind = MessageKind(parts[0].decode("utf-8"))
-        payload = Grillo.HEADER_SEPARATOR.join(parts[1:])
+        payload = parts[1:].decode("utf-8")
 
         return kind, payload
 
@@ -92,7 +103,7 @@ class Grillo:
         """
         Send text via audio.
         """
-        self.send_message(MessageKind.TEXT, text.encode("utf-8"))
+        self.send_message(MessageKind.TEXT, str(text).encode("utf-8"))
 
     def send_clipboard(self):
         """
